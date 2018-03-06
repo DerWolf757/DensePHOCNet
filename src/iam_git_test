@@ -1,0 +1,29 @@
+#!/bin/bash
+nice python tools/train_phocnet.py \
+--doc_img_dir /vol/corpora/document-image-analysis/iam-db/images/ \
+--train_annotation_file /home/fwolf/Workspace/MA_DensePHOCNet/experiments/iam/train.xml \
+--test_annotation_file /home/fwolf/Workspace/MA_DensePHOCNet/experiments/iam/test.xml \
+--proto_dir /home/fwolf/Workspace/MA_DensePHOCNet/data/iam \
+--lmdb_dir /data/fwolf/iam_50000/ \
+-snd /home/fwolf/Workspace/DensePHOCNet/data/iam \
+-min_w 32 \
+-min_h 32 \
+-max_p 50000 \
+-dm \
+-lr 0.0001 \
+-ss 70000 \
+--display 100 \
+--test_interval 10000 \
+--max_iter 100000 \
+-bs 10 \
+-gam 0.1 \
+-gpu 1 \
+-ub \
+--metric cosine \
+-arch dense \
+--pooling tpp \
+-pi \
+-c 5 10 \
+-b 2 \
+-k 12 \
+&>iam_dense_test.log

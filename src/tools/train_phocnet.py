@@ -1,7 +1,4 @@
-import sys
 import argparse
-import logging
-import numpy as np
 from phocnet.training.phocnet_trainer import PHOCNetTrainer
 
 if __name__ == '__main__':

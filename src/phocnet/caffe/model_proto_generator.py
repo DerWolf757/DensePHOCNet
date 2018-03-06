@@ -283,7 +283,7 @@ class ModelProtoGenerator(object):
 
 
     
-    def get_phocnet(self, word_image_lmdb_path, phoc_lmdb_path, phoc_size, pooling, max_out, use_perm, tpp_levels=5, 
+    def get_phocnet(self, word_image_lmdb_path, phoc_lmdb_path, phoc_size, pooling, max_out, tpp_levels=5, 
                         generate_deploy=False):
         '''
         Returns a NetSpec definition of the TPP-PHOCNet with maxout pruning. The definition can then be transformed

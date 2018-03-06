@@ -8,7 +8,6 @@ import os
 import time
 
 import cv2
-import operator
 
 import inspect
 
@@ -25,13 +24,11 @@ from phocnet.caffe.augmentation import AugmentationCreator
 from phocnet.evaluation.time import convert_secs2HHMMSS
 from phocnet.evaluation.cnn import calc_map_from_cnn_features
 from phocnet.io.xml_io import XMLReader
-from phocnet.io.files import save_prototxt, write_list
+from phocnet.io.files import save_prototxt
 from phocnet.io.context_manager import Suppressor
 from phocnet.numpy.numpy_helper import NumpyHelper
 from ws_seg_based.wordspotting_tools.dataset_loader import DatasetLoader
 
-
-import sys
 
 
 class PHOCNetTrainer(object):
@@ -190,13 +187,11 @@ class PHOCNetTrainer(object):
         test_phoc_lmdb_path = os.path.join(self.lmdb_dir, '%s_test_phocs_lmdb' % lmdb_prefix)
             
         # check if we need to create LMDBs
-        if not self.triplet:
-            lmdbs_exist = (os.path.exists(train_word_images_lmdb_path),
-                           os.path.exists(train_phoc_lmdb_path),
-                           os.path.exists(test_word_images_lmdb_path),
-                           os.path.exists(test_phoc_lmdb_path))
-        else:
-            lmdbs_exist = os.path.exists(train_word_images_lmdb_path)
+        lmdbs_exist = (os.path.exists(train_word_images_lmdb_path),
+                       os.path.exists(train_phoc_lmdb_path),
+                       os.path.exists(test_word_images_lmdb_path),
+                       os.path.exists(test_phoc_lmdb_path))
+     
             
                         
         if self.use_bigrams:
@@ -270,14 +265,14 @@ class PHOCNetTrainer(object):
                                                use_bottleneck = self.use_bottleneck, use_compression = self.use_compression, 
                                                pool_init = self.pool_init, conv_init = self.conv_init, init_7 = self.init_7, 
                                                pooling = self.pooling, max_out = self.max_out)
-        elif self.archtiecture =='phoc':
+        elif self.architecture =='phoc':
             train_proto = mpg.get_phocnet(word_image_lmdb_path=train_word_images_lmdb_path, phoc_lmdb_path=train_phoc_lmdb_path, 
                                           phoc_size=n_attributes, pooling = self.pooling, 
                                           generate_deploy=False, max_out = self.max_out)
             test_proto = mpg.get_phocnet(word_image_lmdb_path=test_word_images_lmdb_path, phoc_lmdb_path=test_phoc_lmdb_path,
                                          phoc_size=n_attributes, pooling = self.pooling,
                                          generate_deploy=False, max_out = self.max_out)
-        elif self.archtiecture =='hybrid':
+        elif self.architecture =='hybrid':
             #to do!
             self.logger.info('Hybrid Architectures not implemented yet')
         else:
@@ -303,7 +298,7 @@ class PHOCNetTrainer(object):
         save_prototxt(file_path=solver_proto_path, proto_object=solver_proto, header_comment='Solver PHOCNet %s' % self.dataset_name)
         
         # --- Step 3: train the PHOCNet
-        self.logger.info('Starting SGD for 0 pruned Neurons')
+        self.logger.info('Starting SGD')
         solver = self._run_sgd(solver_proto_path=solver_proto_path)
         
             
