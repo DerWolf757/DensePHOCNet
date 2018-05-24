@@ -138,7 +138,7 @@ class ModelProtoGenerator(object):
             return fc, relu, L.Dropout(relu, dropout_ratio=0.5, in_place=True, include=dict(phase=self.phase_train))
         
         
-    def set_dense_body(self, n, nblocks, growth_rate, nlayers, config, no_batch_normalization, use_bottleneck, use_compression, pool_init, conv_init, init_7):
+    def set_dense_body(self, n, nblocks, growth_rate, nlayers, config, no_batch_normalization, use_bottleneck, use_compression, pool_init, conv_init, init_7, end=None, mid_comp = False):
         '''
         Helper method for the dense body of a DensePHOCNet
         '''
@@ -146,9 +146,15 @@ class ModelProtoGenerator(object):
         conv_init = np.array(conv_init)
         dropout_ratio = 0.0
         
+        if end is None:
+            bottom = n.word_images
+        else:
+            bottom = end
+            
+        
         if init_7:
             nchannels = 64
-            n.conv_init = L.Convolution(n.word_images, kernel_size=7, stride=2, num_output=nchannels,
+            n.conv_init = L.Convolution(bottom, kernel_size=7, stride=2, num_output=nchannels,
                                         pad=3, bias_term=False, weight_filler=dict(type='msra'), bias_filler=dict(type='constant'),
                                         engine=self.conv_engine)
             bottom = n.conv_init
@@ -165,9 +171,6 @@ class ModelProtoGenerator(object):
                 bottom = n.pool_init
                 
         else:
-            bottom = n.word_images
-            
-
             if conv_init.size > 1:
                 for i in range(conv_init.size):    
                     n['Conv_Init%i' % i] = L.Convolution(bottom, kernel_size=3, stride=1, num_output=conv_init[i],
@@ -180,10 +183,10 @@ class ModelProtoGenerator(object):
                         
                     bottom = n.relu_init
                     nchannels = conv_init[i]
-            else:
+            elif conv_init > 0:
                 n['Conv_Init0'] = L.Convolution(bottom, kernel_size=3, stride=1, num_output=int(conv_init),
-                                                     pad=1, bias_term=False, weight_filler=dict(type='msra'), bias_filler=dict(type='constant'),
-                                                     engine=self.conv_engine)
+                                                pad=1, bias_term=False, weight_filler=dict(type='msra'), bias_filler=dict(type='constant'),
+                                                engine=self.conv_engine)
                     
                 n.bn_init = L.BatchNorm(n['Conv_Init0'], in_place=False, eps = 0.00001, param=[dict(lr_mult=0, decay_mult=0), dict(lr_mult=0, decay_mult=0), dict(lr_mult=0, decay_mult=0)])
                 n.scale_init = L.Scale(n.bn_init, bias_term=True, in_place=True, filler=dict(value=1), bias_filler=dict(value=0))
@@ -191,12 +194,14 @@ class ModelProtoGenerator(object):
                  
                 bottom = n.relu_init
                 nchannels = int(conv_init)
+            else:
+                nchannels = 128
                     
 
             if pool_init:         
-                n.pool_init = L.Pooling(n.relu_init, pool=P.Pooling.MAX, kernel_size=3, stride=2, pad=1)
-                        
-            bottom = n.pool_init
+                n.pool_init = L.Pooling(n.relu_init, pool=P.Pooling.MAX, kernel_size=3, stride=2, pad=1)                 
+                bottom = n.pool_init
+                
                  
         temp = bottom
             
@@ -269,6 +274,12 @@ class ModelProtoGenerator(object):
                 temp = n[concat]
                 
                 nchannels += growth_rate
+                
+                if mid_comp and i == round(int(N[b])/2.0):
+                    nchannels = int(0.5*nchannels)
+                    n['comp_bn'], n['comp_sc'], n['comp_relu'], n['comp'], drop = self.bn_relu_conv(bottom, kernel_size=1, nout=nchannels, stride=1, pad=0, dropout_ratio=dropout_ratio)
+                    bottom = n['comp']
+                    temp = n['comp']
               
             if b < nblocks-1:
                 C = 0.5 if use_compression else 1
@@ -401,6 +412,93 @@ class ModelProtoGenerator(object):
         
         if max_out >= 0: 
             k = max_out
+            
+            size_pp = fm_depth*pooling_factor
+            size_pp = int(size_pp/k)
+                
+       
+            n.reshape = L.Reshape(bottom, shape=dict(dim=[1, size_pp,k,1]))
+                
+            n.premax = L.Scale(n.reshape, bias_term=False, in_place=False, filler=dict(value=1), bias_filler=dict(value=0),
+                               param=[dict(lr_mult=0, decay_mult=0)], num_axes = 3)
+            n.maxout = L.Pooling(n.premax, pool=P.Pooling.MAX, global_pooling=True)
+            
+            n.fc6_d, n.relu6, n.drop6 = self.fc_relu(bottom=n.maxout, layer_size=4096,
+                                                   dropout_ratio=0.5, relu_in_place=True)      
+        else:
+            n.fc6_d, n.relu6, n.drop6 = self.fc_relu(bottom=bottom, layer_size=4096,
+                                                   dropout_ratio=0.5, relu_in_place=True)
+            
+        
+        # FC Part
+        n.fc7_d, n.relu7, n.drop7 = self.fc_relu(bottom=n.drop6, layer_size=4096,
+                                                 dropout_ratio=0.5, relu_in_place=True)
+        n.fc8_d = L.InnerProduct(n.drop7, num_output=phoc_size,
+                                 weight_filler=dict(type=self.initialization),
+                                 bias_filler=dict(type='constant'))
+        n.sigmoid = L.Sigmoid(n.fc8_d, include=dict(phase=self.phase_test))
+            
+            
+
+        # output part
+        if not generate_deploy:
+            n.silence = L.Silence(n.sigmoid, ntop=0, include=dict(phase=self.phase_test))
+            n.loss = L.SigmoidCrossEntropyLoss(n.fc8_d, n.phocs)
+            
+        return n.to_proto()
+    
+    def get_hybrid_phocnet(self, word_image_lmdb_path, phoc_lmdb_path, phoc_size, pooling, 
+                          nblocks, growth_rate, nlayers, config, 
+                          no_batch_normalization, use_bottleneck, use_compression, max_out,
+                          generate_deploy=False):
+        
+        n = NetSpec()
+        # Data
+        self.set_phocnet_data(n=n, generate_deploy=generate_deploy,
+                              word_image_lmdb_path=word_image_lmdb_path,
+                              phoc_lmdb_path=phoc_lmdb_path)
+        
+        n.conv1_1, n.relu1_1 = self.conv_relu(n.word_images, nout=64, relu_in_place=True)
+        n.conv1_2, n.relu1_2 = self.conv_relu(n.relu1_1, nout=64, relu_in_place=True)
+        n.pool1 = L.Pooling(n.relu1_2, pooling_param=dict(pool=P.Pooling.MAX, kernel_size=2, stride=2))
+
+        n.conv2_1, n.relu2_1 = self.conv_relu(n.pool1, nout=128, relu_in_place=True)
+        n.conv2_2, n.relu2_2 = self.conv_relu(n.relu2_1, nout=128, relu_in_place=True)
+        n.pool2 = L.Pooling(n.relu2_2, pooling_param=dict(pool=P.Pooling.MAX, kernel_size=2, stride=2))
+        
+        end, fm_depth = self.set_dense_body(n, nblocks=nblocks, growth_rate=growth_rate, nlayers=nlayers, config=config,
+                                            no_batch_normalization=no_batch_normalization, use_bottleneck=use_bottleneck,
+                                            use_compression=False, pool_init=False, init_7=False, conv_init=0, end=n.pool2, mid_comp=use_compression)
+        
+        # Pooling layer
+        tpp_levels = 5
+        
+        if pooling == 'tpp':
+            n.tpp5 = L.TPP(end, tpp_param=dict(pool=P.TPP.MAX, pyramid_layer=range(1, tpp_levels + 1), engine=self.spp_engine))
+            bottom = n.tpp5
+            pooling_factor = 15
+        elif pooling == 'ave':
+            n.gp = L.Pooling(end, pool=P.Pooling.AVE, global_pooling=True )
+            bottom = n.gp
+            pooling_factor = 1
+        elif pooling == 'max':
+            n.gp = L.Pooling(end, pool=P.Pooling.MAX, global_pooling=True )
+            bottom = n.gp
+            pooling_factor = 1
+        elif pooling == 'spp':
+            n.spp5 = L.SPP(end, spp_param=dict(pool=P.SPP.MAX, pyramid_height=3, engine=self.spp_engine))
+            bottom = n.spp5
+            pooling_factor = 21
+        else:
+            raise ValueError('Pooling layer %s unknown' % self.pooling)
+            
+
+                   
+        # Maxout
+        k = max_out
+        
+        if max_out >= 0: 
+            k = max_out
             size_pp = fm_depth*pooling_factor
        
             n.reshape = L.Reshape(bottom, shape=dict(dim=[1, size_pp/k,k,1]))
@@ -432,7 +530,7 @@ class ModelProtoGenerator(object):
             n.loss = L.SigmoidCrossEntropyLoss(n.fc8_d, n.phocs)
             
         return n.to_proto()
-    
+        
 
 def main():
     '''

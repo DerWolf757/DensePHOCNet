@@ -273,8 +273,22 @@ class PHOCNetTrainer(object):
                                          phoc_size=n_attributes, pooling = self.pooling,
                                          generate_deploy=False, max_out = self.max_out)
         elif self.architecture =='hybrid':
-            #to do!
-            self.logger.info('Hybrid Architectures not implemented yet')
+            train_proto = mpg.get_hybrid_phocnet(word_image_lmdb_path=train_word_images_lmdb_path, phoc_lmdb_path=train_phoc_lmdb_path, 
+                                                phoc_size=n_attributes, generate_deploy=False,
+                                                nblocks = self.nblocks, growth_rate = self.growth_rate,
+                                                nlayers = self.nlayers, config = self.config,
+                                                no_batch_normalization = self.no_batch_normalization, 
+                                                use_bottleneck = self.use_bottleneck, use_compression = self.use_compression, 
+                                                pooling = self.pooling, max_out = self.max_out)
+            
+            test_proto = mpg.get_hybrid_phocnet(word_image_lmdb_path=test_word_images_lmdb_path, phoc_lmdb_path=test_phoc_lmdb_path, 
+                                               phoc_size=n_attributes, generate_deploy=False,
+                                               nblocks = self.nblocks, growth_rate = self.growth_rate,
+                                               nlayers = self.nlayers, config = self.config,
+                                               no_batch_normalization = self.no_batch_normalization,
+                                               use_bottleneck = self.use_bottleneck, use_compression = self.use_compression, 
+                                               pooling = self.pooling, max_out = self.max_out)
+            
         else:
             raise ValueError('Unknown Architecture!')
 
@@ -597,6 +611,7 @@ class PHOCNetTrainer(object):
             str_pooling = self.pooling
             str_conf = ''
             str_mo = 'mo%i' % self.max_out if self.max_out >= 0 else ''
+            
 
                 
                 
@@ -610,8 +625,13 @@ class PHOCNetTrainer(object):
                     
                 str_conf = ('L%ib%ik%i' % (self.nlayers,self.nblocks,self.growth_rate))+str_BC
 
+            if str_arch == 'hybrid':
+                str_C = 'C' if self.use_compression else ''
+                str_conf = ('L%ib%ik%i' % (self.nlayers,self.nblocks,self.growth_rate))+str_C
                 
-            name = '%s_%s_%s' % (str_pooling, str_arch,str_conf)
+                    
+            name = '%s_%s_%s_%s' % (str_pooling, str_arch,str_conf,str_mo)
+            
         else:
             name = self.save_net_name
         
